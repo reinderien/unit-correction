@@ -53,8 +53,7 @@ amps   coulombs seconds
 
 import random
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Iterator, Literal
+from typing import Iterator, Literal, NamedTuple
 
 
 def lhs(**kwargs: int) -> dict[str, int]:
@@ -85,22 +84,28 @@ def format_exp(unit: str, exp: int, natural_sign: Literal[1, -1]) -> str:
     return f'{unit}^{exp}'
 
 
-@dataclass
-class Quantity:
+class Quantity(NamedTuple):
     coeff: float
     units: dict[str, int]
 
     def unit_pairs(self, units: dict[str, int], sign: Literal[1, -1]) -> Iterator[tuple[str, int]]:
-        for u in units.keys() | self.units.keys():
-            new_exp = units.get(u, 0) + sign * self.units.get(u, 0)
+        for unit in units.keys() | self.units.keys():
+            new_exp = units.get(unit, 0) + sign * self.units.get(unit, 0)
             if new_exp != 0:
-                yield u, new_exp
+                yield unit, new_exp
 
-    def convert(self, target_unit: str, coeff: float, units: dict[str, int]) -> 'Quantity':
-        sign = 1 if self.units[target_unit] < units[target_unit] else -1
+    def multiply(self, other: 'Quantity', target_unit: str) -> 'Quantity':
+        sign = 1 if self.units[target_unit] < other.units[target_unit] else -1
         return Quantity(
-            coeff=self.coeff**sign * coeff,
-            units=dict(self.unit_pairs(units, sign)),
+            coeff=self.coeff**sign * other.coeff,
+            units=dict(self.unit_pairs(other.units, sign)),
+        )
+
+    @property
+    def reciprocal(self) -> 'Quantity':
+        return Quantity(
+            coeff=1/self.coeff,
+            units={unit: -exp for unit, exp in self.units.items()},
         )
 
     def random_convert(self) -> 'Quantity':
@@ -108,7 +113,7 @@ class Quantity:
         target_unit = random.choice(reduce_options)
         conv_index = CONV_BY_UNIT[target_unit]
         entry = conv_index.pick_from()
-        return entry.convert(target_unit, self.coeff, self.units)
+        return entry.multiply(self, target_unit)
 
     def __str__(self) -> str:
         num_pairs = [
@@ -118,10 +123,10 @@ class Quantity:
         ]
 
         if num_pairs:
-            *num_others, (num_last_u, num_last_e) = num_pairs
+            *num_others, (num_last_unit, num_last_exp) = num_pairs
             num = ' '.join(format_exp(*pair, 1) for pair in num_others)
             num_sep = ' ' if num_others else ''
-            num_units = format_exp(f'{num}{num_sep}{num_last_u}s', num_last_e, 1)
+            num_units = format_exp(f'{num}{num_sep}{num_last_unit}s', num_last_exp, 1)
             division = 'per '
         else:
             num_units = 'inverse'
@@ -133,10 +138,10 @@ class Quantity:
             if exp < 0
         )
 
-        qnum = f'{self.coeff:,} {num_units}'
+        coeff_num = f'{self.coeff:,} {num_units}'
         if den:
-            return f'{qnum} {division}{den}'
-        return qnum
+            return f'{coeff_num} {division}{den}'
+        return coeff_num
 
 
 class ConvIndex:
