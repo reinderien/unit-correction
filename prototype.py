@@ -69,19 +69,22 @@ CONVERSIONS = (
     ( 1, {**lhs(volt=1), **rhs(ampère=1, ohm=1)}),
     ( 1, {**lhs(watt=1), **rhs(volt=1, ampère=1)}),
     ( 1, {**lhs(ampère=1), **rhs(coulomb=1, second=-1)}),
+    ( 1, {**lhs(siemen=1), **rhs(ohm=-1)}),
+
     ( 1, {**lhs(hertz=1), **rhs(second=-1)}),
+    (33.3564e-12, {**lhs(jiffy=1), **rhs(second=1)}),
     (60, {**lhs(minute=1), **rhs(second=1)}),
     (60, {**lhs(hour=1), **rhs(minute=1)}),
     (24, {**lhs(day=1), **rhs(hour=1)}),
     ( 7, {**lhs(week=1), **rhs(day=1)}),
-    ( 1, {**lhs(siemen=1), **rhs(ohm=-1)}),
+
 )
 
 
 def format_exp(unit: str, exp: int, natural_sign: Literal[1, -1]) -> str:
     if exp == natural_sign:
         return unit
-    return f'{unit}^{exp}'
+    return f'{unit}^{exp * natural_sign}'
 
 
 class Quantity(NamedTuple):
@@ -108,12 +111,19 @@ class Quantity(NamedTuple):
             units={unit: -exp for unit, exp in self.units.items()},
         )
 
-    def random_convert(self) -> 'Quantity':
-        reduce_options = tuple(self.units.keys())
-        target_unit = random.choice(reduce_options)
-        conv_index = CONV_BY_UNIT[target_unit]
-        entry = conv_index.pick_from()
-        return entry.multiply(self, target_unit)
+    def random_convert(self, max_rounds: int = 2) -> 'Quantity':
+        output = self
+        n_rounds = random.randint(1, max_rounds)
+        for _ in range(n_rounds):
+            reduce_options = tuple(output.units.keys())
+            target_unit = random.choice(reduce_options)
+            conv_index = CONV_BY_UNIT[target_unit]
+            entry = conv_index.pick_random()
+            output = entry.multiply(output, target_unit)
+        return output
+
+    def __repr__(self) -> str:
+        return str(self)
 
     def __str__(self) -> str:
         num_pairs = [
@@ -151,7 +161,7 @@ class ConvIndex:
     def add(self, coeff: float, units: dict[str, int]):
         self.conversions.append(Quantity(coeff, units))
 
-    def pick_from(self) -> Quantity:
+    def pick_random(self) -> Quantity:
         return random.choice(self.conversions)
 
     @classmethod
@@ -165,8 +175,23 @@ class ConvIndex:
 
         return by_unit
 
+    def __str__(self) -> str:
+        return ', '.join(str(c) for c in self.conversions)
+
+    def __repr__(self) -> str:
+        return str(self)
+
 
 CONV_BY_UNIT = ConvIndex.index_all()
-start = Quantity(2e3, {'volt': 1})
-result = start.random_convert()
-print(result)
+
+
+def demo() -> None:
+    start = Quantity(2e3, {'volt': 1})
+    # start = Quantity(1, {'jiffy': 1})
+    for _ in range(10):
+        result = start.random_convert()
+        print(result)
+
+
+if __name__ == '__main__':
+    demo()
