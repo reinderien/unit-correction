@@ -88,6 +88,12 @@ def format_exp(unit: str, exp: int, natural_sign: Literal[1, -1]) -> str:
     return f'{unit}^{exp * natural_sign}'
 
 
+def get_plural(unit: str) -> str:
+    if re.search(r'[sz]$', unit):
+        return ''
+    return 's'
+
+
 class Quantity(NamedTuple):
     coeff: float
     units: dict[str, int]
@@ -126,10 +132,7 @@ class Quantity(NamedTuple):
             output = entry.multiply(output, target_unit)
         return output
 
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
+    def format_numerator(self, si_exp: int) -> tuple[str, str]:
         num_pairs = [
             (unit, exp)
             for unit, exp in self.units.items()
@@ -141,27 +144,44 @@ class Quantity(NamedTuple):
             num = ' '.join(format_exp(*pair, 1) for pair in num_others)
             num_sep = ' ' if num_others else ''
 
-            if re.match(r'[sz]$', num_last_unit):
-                plural = ''
-            else:
-                plural = 's'
+            plural = get_plural(num_last_unit)
 
-            num_units = format_exp(f'{num}{num_sep}{num_last_unit}{plural}', num_last_exp, 1)
-            division = 'per '
-        else:
-            num_units = 'inverse'
-            division = ''
+            return (
+                format_exp(f'{num}{num_sep}{num_last_unit}{plural}', num_last_exp, 1),
+                'per '
+            )
 
-        den = ' '.join(
+        return 'inverse', ''
+
+    def format_denominator(self, si_exp: int) -> str:
+        return ' '.join(
             format_exp(unit, exp, -1)
             for unit, exp in self.units.items()
             if exp < 0
         )
 
-        coeff_num = f'{self.coeff:,} {num_units}'
+    def to_string(
+        self,
+        si_num_exp: int = 0,
+        si_den_exp: int = 0,
+    ) -> str:
+        num_units, division = self.format_numerator(si_num_exp)
+        den = self.format_denominator(si_den_exp)
+        if den and division != 'per ':
+            den += get_plural(den)
+
+        coeff = self.coeff * 10**(si_den_exp - si_num_exp)
+        coeff_num = f'{coeff:,} {num_units}'
+
         if den:
             return f'{coeff_num} {division}{den}'
         return coeff_num
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        return self.to_string()
 
 
 class ConvIndex:
