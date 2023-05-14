@@ -52,6 +52,7 @@ amps   coulombs seconds
 """
 
 import random
+import re
 from collections import defaultdict
 from typing import Iterator, Literal, NamedTuple
 
@@ -113,6 +114,9 @@ class Quantity(NamedTuple):
 
     def random_convert(self, max_rounds: int = 2) -> 'Quantity':
         output = self
+        if random.random() < 0.20:
+            output = output.reciprocal
+
         n_rounds = random.randint(1, max_rounds)
         for _ in range(n_rounds):
             reduce_options = tuple(output.units.keys())
@@ -136,7 +140,13 @@ class Quantity(NamedTuple):
             *num_others, (num_last_unit, num_last_exp) = num_pairs
             num = ' '.join(format_exp(*pair, 1) for pair in num_others)
             num_sep = ' ' if num_others else ''
-            num_units = format_exp(f'{num}{num_sep}{num_last_unit}s', num_last_exp, 1)
+
+            if re.match(r'[sz]$', num_last_unit):
+                plural = ''
+            else:
+                plural = 's'
+
+            num_units = format_exp(f'{num}{num_sep}{num_last_unit}{plural}', num_last_exp, 1)
             division = 'per '
         else:
             num_units = 'inverse'
