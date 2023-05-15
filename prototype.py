@@ -50,10 +50,11 @@ amps   coulombs seconds
 
 
 """
-
+import math
 import random
 import re
-from collections import defaultdict
+from bisect import bisect_left
+from collections import defaultdict, OrderedDict
 from typing import Iterator, Literal, NamedTuple
 
 
@@ -78,8 +79,35 @@ CONVERSIONS = (
     (60, {**lhs(hour=1), **rhs(minute=1)}),
     (24, {**lhs(day=1), **rhs(hour=1)}),
     ( 7, {**lhs(week=1), **rhs(day=1)}),
-
 )
+
+SI_PREFIXES = OrderedDict({
+    -30: 'quecto',
+    -27: 'ronto',
+    -24: 'yocto',
+    -21: 'zepto',
+    -18: 'atto',
+    -15: 'femto',
+    -12: 'pico',
+     -9: 'nano',
+     -6: 'micro',
+     -3: 'milli',
+     -2: 'centi',
+     -1: 'deci',
+      0: '',
+      1: 'deca',
+      2: 'hecto',
+      3: 'kilo',
+      6: 'mega',
+      9: 'giga',
+     12: 'tera',
+     15: 'peta',
+     18: 'exa',
+     21: 'zetta',
+     24: 'yotta',
+     27: 'ronna',
+     30: 'quetta',
+})
 
 
 def format_exp(unit: str, exp: int, natural_sign: Literal[1, -1]) -> str:
@@ -92,6 +120,49 @@ def get_plural(unit: str) -> str:
     if re.search(r'[sz]$', unit):
         return ''
     return 's'
+
+
+def get_si(x: float, num_powers: list[int], den_powers: list[int]) -> tuple[
+    int, str, str,
+]:
+    keys = tuple(SI_PREFIXES.keys())
+
+    use_num = len(num_powers) == 1 and random.random() < 0.50
+    use_den = len(den_powers) == 1 and random.random() < 0.50
+    '''
+    outer exponents always apply after the SI prefix
+    i.e. it's (km)^2.
+    adding 'k' (10**3) is as if you added 10**6, so divide this exponent by 2
+    '''
+    exp = math.floor(math.log10(abs(x)))
+    exp_new = 0
+
+    if use_num:
+        num_min = max(min(keys), (exp - 6)/num_powers[0])
+        num_max = min(max(keys), (exp + 6)/num_powers[0])
+        num_choices = keys[
+            bisect_left(keys, num_min):
+            bisect_left(keys, num_max)
+        ]
+        num = random.choice(num_choices)
+        num_pre = SI_PREFIXES[num]
+        exp_new = exp - num*num_powers[0]
+    else:
+        num_pre, num, exp_new = '', 0, exp
+
+    if use_den:
+        den_min = max(min(keys), exp_new - 6)
+        den_max = min(max(keys), exp_new + 6)
+        den_choices = keys[
+            bisect_left(keys, den_min):
+            bisect_left(keys, den_max) + 1
+        ]
+        den = random.choice(den_choices)
+        den_pre = SI_PREFIXES[den]
+    else:
+        den_pre, den = '', 0
+
+    return den - num, num_pre, den_pre
 
 
 class Quantity(NamedTuple):
@@ -132,49 +203,55 @@ class Quantity(NamedTuple):
             output = entry.multiply(output, target_unit)
         return output
 
-    def format_numerator(self, si_exp: int) -> tuple[str, str]:
-        num_pairs = [
+    def format_numerator(self) -> tuple[str, str, list[int]]:
+        pairs = [
             (unit, exp)
             for unit, exp in self.units.items()
             if exp > 0
         ]
 
-        if num_pairs:
-            *num_others, (num_last_unit, num_last_exp) = num_pairs
-            num = ' '.join(format_exp(*pair, 1) for pair in num_others)
-            num_sep = ' ' if num_others else ''
+        if not pairs:
+            return 'inverse', '', []
 
-            plural = get_plural(num_last_unit)
+        *num_others, (num_last_unit, num_last_exp) = pairs
+        num = ' '.join(format_exp(*pair, 1) for pair in num_others)
+        num_sep = ' ' if num_others else ''
 
-            return (
-                format_exp(f'{num}{num_sep}{num_last_unit}{plural}', num_last_exp, 1),
-                'per '
-            )
+        plural = get_plural(num_last_unit)
 
-        return 'inverse', ''
-
-    def format_denominator(self, si_exp: int) -> str:
-        return ' '.join(
-            format_exp(unit, exp, -1)
-            for unit, exp in self.units.items()
-            if exp < 0
+        return (
+            format_exp(f'{num}{num_sep}{num_last_unit}{plural}', num_last_exp, 1),
+            'per ',
+            [p[1] for p in pairs],
         )
 
-    def to_string(
-        self,
-        si_num_exp: int = 0,
-        si_den_exp: int = 0,
-    ) -> str:
-        num_units, division = self.format_numerator(si_num_exp)
-        den = self.format_denominator(si_den_exp)
+    def format_denominator(self) -> tuple[str, list[int]]:
+        pairs = [
+            (unit, exp)
+            for unit, exp in self.units.items()
+            if exp < 0
+        ]
+        div_str = ' '.join(
+            format_exp(unit, exp, -1) for unit, exp in pairs
+        )
+        return div_str, [p[1] for p in pairs]
+
+    def to_string(self, maybe_si: bool = False) -> str:
+        num_units, division, num_powers = self.format_numerator()
+        den, den_powers = self.format_denominator()
         if den and division != 'per ':
             den += get_plural(den)
 
-        coeff = self.coeff * 10**(si_den_exp - si_num_exp)
-        coeff_num = f'{coeff:,} {num_units}'
+        if maybe_si:
+            exp_adj, prefix_num, prefix_den = get_si(self.coeff, num_powers, den_powers)
+        else:
+            si_num_exp, si_den_exp, prefix_num, prefix_den = 0, 0, '', ''
+
+        coeff = self.coeff * 10**exp_adj
+        coeff_num = f'{coeff:,} {prefix_num}{num_units}'
 
         if den:
-            return f'{coeff_num} {division}{den}'
+            return f'{coeff_num} {division}{prefix_den}{den}'
         return coeff_num
 
     def __repr__(self) -> str:
@@ -218,9 +295,11 @@ CONV_BY_UNIT = ConvIndex.index_all()
 def demo() -> None:
     start = Quantity(2e3, {'volt': 1})
     # start = Quantity(1, {'jiffy': 1})
-    for _ in range(10):
-        result = start.random_convert()
-        print(result)
+    results = {
+        start.random_convert().to_string(maybe_si=True)
+        for _ in range(100)
+    }
+    print('\n'.join(results))
 
 
 if __name__ == '__main__':
